@@ -40,12 +40,12 @@ export async function fetchApi<T>(path: string, options?: RequestInit): Promise<
 /**
  * Upload a file using XMLHttpRequest to track upload progress.
  */
-export function uploadFileWithProgress(
+export function uploadFileWithProgress<T = unknown>(
 	bucketId: string,
 	file: File,
 	base64Content: string,
 	onProgress: (progress: number) => void
-): Promise<any> {
+): Promise<T> {
 	return new Promise((resolve, reject) => {
 		const xhr = new XMLHttpRequest();
 		xhr.open('POST', `/api/buckets/${bucketId}/files`);
@@ -64,7 +64,7 @@ export function uploadFileWithProgress(
 				reject(new ApiError(xhr.status, 'Unauthorized'));
 				return;
 			}
-			
+
 			if (xhr.status >= 200 && xhr.status < 300) {
 				try {
 					const response = JSON.parse(xhr.responseText);

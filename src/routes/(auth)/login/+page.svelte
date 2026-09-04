@@ -27,7 +27,7 @@
 			toast.success('Logged in successfully');
 			goto('/');
 		},
-		onError: (error: any) => {
+		onError: (error: Error) => {
 			errorMsg = error.message || 'Login failed';
 			toast.error(errorMsg);
 		}

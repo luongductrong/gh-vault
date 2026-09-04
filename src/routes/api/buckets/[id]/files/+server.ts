@@ -24,10 +24,7 @@ export const GET: RequestHandler = async ({ params, url }) => {
 		return json({ error: 'Not Found', message: `Bucket ${id} not found` }, { status: 404 });
 	}
 
-	const [{ total }] = await db
-		.select({ total: count() })
-		.from(files)
-		.where(eq(files.bucketId, id));
+	const [{ total }] = await db.select({ total: count() }).from(files).where(eq(files.bucketId, id));
 
 	const data = await db
 		.select()
@@ -140,9 +137,7 @@ export const POST: RequestHandler = async ({ params, request }) => {
 		const newFileCount = bucket.fileCount + 1;
 		const newTotalSize = bucket.totalSizeBytes + sizeBytes;
 		const newStatus =
-			newFileCount >= bucket.maxFiles || newTotalSize >= bucket.maxSizeBytes
-				? 'full'
-				: 'available';
+			newFileCount >= bucket.maxFiles || newTotalSize >= bucket.maxSizeBytes ? 'full' : 'available';
 
 		await db
 			.update(buckets)

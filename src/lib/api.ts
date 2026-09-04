@@ -70,7 +70,7 @@ export function uploadFileWithProgress<T = unknown>(
 					const response = JSON.parse(xhr.responseText);
 					resolve(response);
 				} catch {
-					resolve(xhr.responseText);
+					resolve(xhr.responseText as unknown as T);
 				}
 			} else {
 				let message = 'Upload failed';

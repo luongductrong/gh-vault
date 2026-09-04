@@ -21,7 +21,7 @@ function ghHeaders(token: string): Record<string, string> {
 export async function createRepo(
 	token: string,
 	name: string,
-	isPrivate = true
+	isPrivate = false
 ): Promise<GitHubRepoResponse> {
 	const res = await fetch(`${GITHUB_API}/user/repos`, {
 		method: 'POST',

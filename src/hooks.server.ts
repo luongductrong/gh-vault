@@ -18,13 +18,16 @@ const authHandle: Handle = async ({ event, resolve }) => {
 		return resolve(event);
 	}
 
-	// All other /api/* routes require a valid Bearer token
-	const authHeader = event.request.headers.get('authorization');
-	if (!authHeader?.startsWith('Bearer ')) {
-		return json({ error: 'Unauthorized', message: 'Bearer token required' }, { status: 401 });
+	// Đọc token từ HttpOnly cookie thay vì header
+	const token = event.cookies.get('session_token');
+
+	if (!token) {
+		return json(
+			{ error: 'Unauthorized', message: 'Authentication cookie required' },
+			{ status: 401 }
+		);
 	}
 
-	const token = authHeader.slice(7).trim();
 	const jwtSecret = env.APP_JWT_SECRET;
 
 	if (!jwtSecret) {
@@ -37,7 +40,9 @@ const authHandle: Handle = async ({ event, resolve }) => {
 
 	const isValid = await verifySessionToken(token, jwtSecret);
 	if (!isValid) {
-		return json({ error: 'Unauthorized', message: 'Invalid or expired token' }, { status: 401 });
+		// Token không hợp lệ hoặc đã hết hạn, tiện tay xóa luôn cookie
+		event.cookies.delete('session_token', { path: '/' });
+		return json({ error: 'Unauthorized', message: 'Invalid or expired session' }, { status: 401 });
 	}
 
 	event.locals.authenticated = true;

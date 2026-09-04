@@ -28,6 +28,7 @@
 		"@sveltejs/vite-plugin-svelte": "^7.1.2",
 		"@tailwindcss/vite": "^4.3.0",
 		"@tanstack/svelte-query": "^6.1.48",
+		"@tanstack/svelte-query-devtools": "^6.1.48",
 		"@types/node": "^24",
 		"bits-ui": "^2.19.0",
 		"clsx": "^2.1.1",

@@ -2,25 +2,33 @@
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
 	import { Label } from '$lib/components/ui/label';
-	import * as Card from '$lib/components/ui/card';
+	import {
+		Card,
+		CardContent,
+		CardDescription,
+		CardHeader,
+		CardTitle
+	} from '$lib/components/ui/card';
 	import { fetchApi } from '$lib/api';
 	import { createMutation } from '@tanstack/svelte-query';
 	import { toast } from 'svelte-sonner';
 	import { goto } from '$app/navigation';
 	import { z } from 'zod';
 
+	let username = $state('');
 	let password = $state('');
 	let errorMsg = $state('');
 
 	const loginSchema = z.object({
+		username: z.string().min(1, 'Username is required'),
 		password: z.string().min(1, 'Password is required')
 	});
 
 	const loginMutation = createMutation(() => ({
-		mutationFn: async (pwd: string) => {
+		mutationFn: async (payload: { username: string; password: string }) => {
 			return fetchApi('/auth/login', {
 				method: 'POST',
-				body: JSON.stringify({ password: pwd })
+				body: JSON.stringify(payload)
 			});
 		},
 		onSuccess: () => {
@@ -37,24 +45,35 @@
 		e.preventDefault();
 		errorMsg = '';
 
-		const result = loginSchema.safeParse({ password });
+		const result = loginSchema.safeParse({ username, password });
 		if (!result.success) {
 			errorMsg = result.error.issues[0].message;
 			return;
 		}
 
-		loginMutation.mutate(password);
+		loginMutation.mutate({ username, password });
 	}
 </script>
 
 <div class="flex min-h-screen items-center justify-center bg-background p-4">
-	<Card.Root class="w-full max-w-[24rem]">
-		<Card.Header>
-			<Card.Title class="text-2xl font-bold">gh-vault</Card.Title>
-			<Card.Description>Enter your admin password to continue.</Card.Description>
-		</Card.Header>
-		<Card.Content>
+	<Card class="w-full max-w-[24rem]">
+		<CardHeader>
+			<CardTitle class="text-2xl font-bold">gh-vault</CardTitle>
+			<CardDescription>Enter your credentials to continue.</CardDescription>
+		</CardHeader>
+		<CardContent>
 			<form onsubmit={handleSubmit} class="flex flex-col gap-6">
+				<div class="flex flex-col gap-2">
+					<Label for="username">Username</Label>
+					<Input
+						id="username"
+						type="text"
+						bind:value={username}
+						disabled={loginMutation.isPending}
+						placeholder="admin"
+						autocomplete="username"
+					/>
+				</div>
 				<div class="flex flex-col gap-2">
 					<Label for="password">Password</Label>
 					<Input
@@ -77,6 +96,6 @@
 					{/if}
 				</Button>
 			</form>
-		</Card.Content>
-	</Card.Root>
+		</CardContent>
+	</Card>
 </div>

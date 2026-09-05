@@ -2,6 +2,7 @@
 	import {
 		ArrowLeft,
 		Copy,
+		Eye,
 		ExternalLink,
 		File as FileIcon,
 		FileImage,
@@ -16,7 +17,8 @@
 	import { fetchApi, uploadFileWithProgress, fileToBase64, formatBytes } from '$lib/api';
 	import { createQuery, createMutation, useQueryClient } from '@tanstack/svelte-query';
 	import { Button } from '$lib/components/ui/button';
-	import * as Card from '$lib/components/ui/card';
+	import { Card, CardContent } from '$lib/components/ui/card';
+	import { Dialog, DialogContent, DialogTitle, DialogDescription } from '$lib/components/ui/dialog';
 	import { Skeleton } from '$lib/components/ui/skeleton';
 	import { toast } from 'svelte-sonner';
 	import type { Bucket, FileItem } from '$lib/types';
@@ -39,6 +41,8 @@
 
 	let uploadProgress = $state<number | null>(null);
 	let fileInputRef = $state<HTMLInputElement | null>(null);
+	let previewFile = $state<FileItem | null>(null);
+	let isPreviewOpen = $state(false);
 
 	const uploadMutation = createMutation(() => ({
 		mutationFn: async (file: File) => {
@@ -66,7 +70,6 @@
 		if (!target.files || target.files.length === 0) return;
 
 		const file = target.files[0];
-		// Validate size locally (4MB limit as per backend)
 		if (file.size > 4 * 1024 * 1024) {
 			toast.error('File size exceeds 4MB limit');
 			target.value = '';
@@ -85,6 +88,11 @@
 			toast.success('Copied to clipboard');
 		});
 	}
+
+	function openPreview(file: FileItem) {
+		previewFile = file;
+		isPreviewOpen = true;
+	}
 </script>
 
 <div class="container mx-auto max-w-7xl space-y-8 p-4 md:p-6 lg:p-8">
@@ -95,11 +103,11 @@
 			<Skeleton class="h-6 w-1/4" />
 		</div>
 	{:else if bucketQuery.isError}
-		<Card.Root class="border-destructive/50 bg-destructive/10">
-			<Card.Content class="p-6">
+		<Card class="border-destructive/50 bg-destructive/10">
+			<CardContent class="p-6">
 				<p class="font-medium text-destructive">Failed to load vault details</p>
-			</Card.Content>
-		</Card.Root>
+			</CardContent>
+		</Card>
 	{:else if bucketQuery.data}
 		{@const b = bucketQuery.data}
 		<div
@@ -117,10 +125,15 @@
 					<h1 class="text-3xl font-bold tracking-tight">{b.displayName || b.githubRepoName}</h1>
 				</div>
 				<div class="ml-8 flex flex-wrap items-center gap-x-6 gap-y-2 text-sm text-muted-foreground">
-					<span class="flex items-center gap-1.5">
+					<a
+						href="https://github.com/{b.githubRepoFullName}"
+						target="_blank"
+						rel="noopener noreferrer"
+						class="flex items-center gap-1.5 transition-colors hover:text-foreground"
+					>
 						<GitBranch class="mr-1" size={16} />
 						{b.githubRepoFullName}
-					</span>
+					</a>
 					<span class="flex items-center gap-1.5">
 						<FileImage size={16} />
 						{b.fileCount} / {b.maxFiles} files
@@ -160,12 +173,16 @@
 		</div>
 	{/if}
 
-	<!-- File Grid -->
+	<!-- File List -->
 	<div class="pt-2">
 		{#if filesQuery.isPending}
-			<div class="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
-				{#each Array(10) as _, i (i)}
-					<Skeleton class="aspect-square w-full" />
+			<div class="flex flex-col divide-y divide-border rounded-lg border border-border">
+				{#each Array(8) as _, i (i)}
+					<div class="flex items-center gap-4 px-4 py-3">
+						<Skeleton class="size-8 shrink-0" />
+						<Skeleton class="h-4 flex-1" />
+						<Skeleton class="h-4 w-16 shrink-0" />
+					</div>
 				{/each}
 			</div>
 		{:else if filesQuery.isError}
@@ -182,59 +199,109 @@
 				<p>No files uploaded yet.</p>
 			</div>
 		{:else}
-			<div
-				class="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6"
-			>
-				{#each filesQuery.data?.data || [] as file (file.id)}
-					<Card.Root class="group relative flex flex-col overflow-hidden">
-						<div class="relative aspect-square overflow-hidden bg-muted/30">
-							{#if file.mimeType?.startsWith('image/')}
-								<img
-									src={file.cdnUrl}
-									alt={file.originalName}
-									class="h-full w-full object-cover transition-transform group-hover:scale-105"
-									loading="lazy"
-								/>
-							{:else}
-								<div class="flex h-full w-full items-center justify-center text-muted-foreground">
-									<FileIcon size={32} />
-								</div>
-							{/if}
-
-							<!-- Hover Overlay -->
-							<div
-								class="absolute inset-0 flex items-center justify-center gap-2 bg-background/80 opacity-0 backdrop-blur-sm transition-opacity group-hover:opacity-100"
-							>
-								<Button
-									size="icon"
-									variant="secondary"
-									onclick={() => copyToClipboard(file.cdnUrl)}
-									title="Copy CDN Link"
-								>
-									<Copy size={16} />
-								</Button>
-								<Button
-									size="icon"
-									variant="secondary"
-									href={file.cdnUrl}
-									target="_blank"
-									rel="noopener noreferrer"
-									title="Open original"
-								>
-									<ExternalLink size={16} />
-								</Button>
-							</div>
-						</div>
-						<div class="flex flex-col border-t border-border p-2">
-							<span class="truncate text-xs font-medium" title={file.originalName}
-								>{file.originalName}</span
-							>
-							<span class="text-[0.65rem] text-muted-foreground">{formatBytes(file.sizeBytes)}</span
-							>
-						</div>
-					</Card.Root>
-				{/each}
+			<div class="overflow-hidden rounded-lg border border-border">
+				<table class="w-full text-sm">
+					<thead>
+						<tr
+							class="border-b border-border bg-muted/40 text-left text-xs tracking-wider text-muted-foreground uppercase"
+						>
+							<th class="px-4 py-2.5">File</th>
+							<th class="hidden px-4 py-2.5 md:table-cell">Type</th>
+							<th class="hidden px-4 py-2.5 sm:table-cell">Size</th>
+							<th class="hidden px-4 py-2.5 lg:table-cell">Uploaded</th>
+							<th class="px-4 py-2.5 text-right">Actions</th>
+						</tr>
+					</thead>
+					<tbody class="divide-y divide-border">
+						{#each filesQuery.data?.data || [] as file (file.id)}
+							<tr class="transition-colors hover:bg-muted/30">
+								<td class="px-4 py-3">
+									<div class="flex items-center gap-3">
+										{#if file.mimeType?.startsWith('image/')}
+											<FileImage size={18} class="shrink-0 text-muted-foreground" />
+										{:else}
+											<FileIcon size={18} class="shrink-0 text-muted-foreground" />
+										{/if}
+										<span class="max-w-48 truncate font-medium" title={file.originalName}>
+											{file.originalName}
+										</span>
+									</div>
+								</td>
+								<td class="hidden px-4 py-3 text-muted-foreground md:table-cell">
+									{file.mimeType ?? '—'}
+								</td>
+								<td class="hidden px-4 py-3 text-muted-foreground sm:table-cell">
+									{formatBytes(file.sizeBytes)}
+								</td>
+								<td class="hidden px-4 py-3 text-muted-foreground lg:table-cell">
+									{new Date(file.createdAt).toLocaleDateString()}
+								</td>
+								<td class="px-4 py-3">
+									<div class="flex items-center justify-end gap-1">
+										{#if file.mimeType?.startsWith('image/')}
+											<Button
+												size="icon-sm"
+												variant="ghost"
+												onclick={() => openPreview(file)}
+												title="Preview"
+											>
+												<Eye size={15} />
+											</Button>
+										{/if}
+										<Button
+											size="icon-sm"
+											variant="ghost"
+											onclick={() => copyToClipboard(file.cdnUrl)}
+											title="Copy CDN link"
+										>
+											<Copy size={15} />
+										</Button>
+										<Button
+											size="icon-sm"
+											variant="ghost"
+											href={file.cdnUrl}
+											target="_blank"
+											rel="noopener noreferrer"
+											title="Open in new tab"
+										>
+											<ExternalLink size={15} />
+										</Button>
+									</div>
+								</td>
+							</tr>
+						{/each}
+					</tbody>
+				</table>
 			</div>
 		{/if}
 	</div>
 </div>
+
+<!-- Preview Dialog -->
+<Dialog bind:open={isPreviewOpen}>
+	<DialogContent class="max-w-3xl overflow-hidden p-0">
+		<DialogTitle class="sr-only">{previewFile?.originalName ?? 'Preview'}</DialogTitle>
+		<DialogDescription class="sr-only">Image preview</DialogDescription>
+		{#if previewFile}
+			<img
+				src={previewFile.cdnUrl}
+				alt={previewFile.originalName}
+				class="max-h-[80vh] w-full object-contain"
+			/>
+			<div class="flex items-center justify-between gap-4 border-t border-border px-4 py-3 text-sm">
+				<span class="truncate font-medium">{previewFile.originalName}</span>
+				<div class="flex shrink-0 items-center gap-2 text-muted-foreground">
+					<span>{formatBytes(previewFile.sizeBytes)}</span>
+					<Button
+						size="sm"
+						variant="secondary"
+						onclick={() => copyToClipboard(previewFile!.cdnUrl)}
+					>
+						<Copy size={14} class="mr-1.5" />
+						Copy CDN link
+					</Button>
+				</div>
+			</div>
+		{/if}
+	</DialogContent>
+</Dialog>

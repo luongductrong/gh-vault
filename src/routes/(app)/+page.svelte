@@ -2,11 +2,26 @@
 	import { FolderOpen } from '@lucide/svelte';
 	import { fetchApi, formatBytes } from '$lib/api';
 	import { createQuery, createMutation, useQueryClient } from '@tanstack/svelte-query';
-	import * as Card from '$lib/components/ui/card';
+	import {
+		Card,
+		CardContent,
+		CardDescription,
+		CardFooter,
+		CardHeader,
+		CardTitle
+	} from '$lib/components/ui/card';
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
 	import { Label } from '$lib/components/ui/label';
-	import * as Dialog from '$lib/components/ui/dialog';
+	import {
+		Dialog,
+		DialogContent,
+		DialogDescription,
+		DialogFooter,
+		DialogHeader,
+		DialogTitle,
+		DialogTrigger
+	} from '$lib/components/ui/dialog';
 	import { Skeleton } from '$lib/components/ui/skeleton';
 	import { toast } from 'svelte-sonner';
 	import { goto } from '$app/navigation';
@@ -74,19 +89,19 @@
 			<p class="mt-1 text-muted-foreground">Manage your CDN storage buckets.</p>
 		</div>
 
-		<Dialog.Root bind:open={isCreateOpen}>
-			<Dialog.Trigger>
+		<Dialog bind:open={isCreateOpen}>
+			<DialogTrigger>
 				{#snippet child({ props })}
 					<Button {...props}>Create New Vault</Button>
 				{/snippet}
-			</Dialog.Trigger>
-			<Dialog.Content class="sm:max-w-md">
-				<Dialog.Header>
-					<Dialog.Title>Create New Vault</Dialog.Title>
-					<Dialog.Description>
+			</DialogTrigger>
+			<DialogContent class="sm:max-w-md">
+				<DialogHeader>
+					<DialogTitle>Create New Vault</DialogTitle>
+					<DialogDescription>
 						This will create a new GitHub repository under your account to store files.
-					</Dialog.Description>
-				</Dialog.Header>
+					</DialogDescription>
+				</DialogHeader>
 
 				<form onsubmit={handleCreateSubmit} class="space-y-6 pt-4">
 					<div class="space-y-2">
@@ -103,7 +118,7 @@
 						{/if}
 					</div>
 
-					<Dialog.Footer>
+					<DialogFooter>
 						<Button
 							type="button"
 							variant="outline"
@@ -119,38 +134,38 @@
 								Create Vault
 							{/if}
 						</Button>
-					</Dialog.Footer>
+					</DialogFooter>
 				</form>
-			</Dialog.Content>
-		</Dialog.Root>
+			</DialogContent>
+		</Dialog>
 	</div>
 
 	{#if bucketsQuery.isPending}
 		<div class="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
 			{#each Array(3) as _, i (i)}
-				<Card.Root>
-					<Card.Header class="space-y-2">
+				<Card>
+					<CardHeader class="space-y-2">
 						<Skeleton class="h-5 w-1/2" />
 						<Skeleton class="h-4 w-3/4" />
-					</Card.Header>
-					<Card.Content>
+					</CardHeader>
+					<CardContent>
 						<Skeleton class="h-10 w-full" />
-					</Card.Content>
-				</Card.Root>
+					</CardContent>
+				</Card>
 			{/each}
 		</div>
 	{:else if bucketsQuery.isError}
-		<Card.Root class="border-destructive/50 bg-destructive/10">
-			<Card.Content class="flex flex-col items-center justify-center p-10 text-center">
+		<Card class="border-destructive/50 bg-destructive/10">
+			<CardContent class="flex flex-col items-center justify-center p-10 text-center">
 				<p class="mb-4 font-medium text-destructive">
 					Error loading vaults: {bucketsQuery.error.message}
 				</p>
 				<Button variant="outline" onclick={() => bucketsQuery.refetch()}>Try Again</Button>
-			</Card.Content>
-		</Card.Root>
+			</CardContent>
+		</Card>
 	{:else if bucketsQuery.data?.length === 0}
-		<Card.Root class="border-dashed">
-			<Card.Content
+		<Card class="border-dashed">
+			<CardContent
 				class="flex flex-col items-center justify-center p-12 text-center text-muted-foreground"
 			>
 				<FolderOpen size={48} class="mb-4 opacity-50" />
@@ -159,21 +174,21 @@
 					You haven't created any vaults yet. Create your first vault to start uploading files.
 				</p>
 				<Button onclick={() => (isCreateOpen = true)}>Create New Vault</Button>
-			</Card.Content>
-		</Card.Root>
+			</CardContent>
+		</Card>
 	{:else}
 		<div class="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
 			{#each bucketsQuery.data || [] as bucket (bucket.id)}
-				<Card.Root class="flex flex-col transition-colors hover:border-primary/50">
-					<Card.Header>
-						<Card.Title class="truncate" title={bucket.displayName || bucket.githubRepoName}>
+				<Card class="flex flex-col transition-colors hover:border-primary/50">
+					<CardHeader>
+						<CardTitle class="truncate" title={bucket.displayName || bucket.githubRepoName}>
 							{bucket.displayName || bucket.githubRepoName}
-						</Card.Title>
-						<Card.Description class="truncate font-mono text-xs">
+						</CardTitle>
+						<CardDescription class="truncate font-mono text-xs">
 							{bucket.githubRepoName}
-						</Card.Description>
-					</Card.Header>
-					<Card.Content class="flex-1 space-y-4 text-sm">
+						</CardDescription>
+					</CardHeader>
+					<CardContent class="flex-1 space-y-4 text-sm">
 						<div class="flex justify-between border-b border-border pb-2">
 							<span class="text-muted-foreground">Files</span>
 							<span class="font-medium">{bucket.fileCount} / {bucket.maxFiles}</span>
@@ -199,8 +214,8 @@
 								{bucket.status === 'full' ? 'Full' : 'Available'}
 							</span>
 						</div>
-					</Card.Content>
-					<Card.Footer>
+					</CardContent>
+					<CardFooter>
 						<Button
 							variant="secondary"
 							class="w-full"
@@ -208,8 +223,8 @@
 						>
 							Open Vault
 						</Button>
-					</Card.Footer>
-				</Card.Root>
+					</CardFooter>
+				</Card>
 			{/each}
 		</div>
 	{/if}

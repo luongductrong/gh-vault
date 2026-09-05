@@ -2,21 +2,24 @@ import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { db } from '$lib/server/db';
 import { buckets, files } from '$lib/server/db/schema';
-import { eq, count, desc } from 'drizzle-orm';
+import { eq, desc, asc, and, like, or } from 'drizzle-orm';
 import { getGitHubConfig } from '$lib/server/config';
 import { uploadFile, buildCdnUrl } from '$lib/server/github/contents';
 
 const MAX_UPLOAD_BYTES = 4 * 1024 * 1024; // 4MB
 
 /**
- * GET /api/buckets/:id/files?page=1&limit=20
+ * GET /api/buckets/:id/files?offset=0&limit=20
  * List files in a bucket (from DB), paginated.
  */
 export const GET: RequestHandler = async ({ params, url }) => {
 	const { id } = params;
-	const page = parseInt(url.searchParams.get('page') ?? '1', 10);
+	// Always use offset-based pagination instead of pages to avoid confusion when flattening
+	const offset = parseInt(url.searchParams.get('offset') ?? '0', 10);
 	const limit = parseInt(url.searchParams.get('limit') ?? '20', 10);
-	const offset = (page - 1) * limit;
+	const search = url.searchParams.get('search') ?? '';
+	const sortBy = url.searchParams.get('sortBy') ?? 'createdAt';
+	const sortOrder = url.searchParams.get('sortOrder') ?? 'desc';
 
 	// Verify bucket exists
 	const [bucket] = await db.select().from(buckets).where(eq(buckets.id, id)).limit(1);
@@ -24,17 +27,36 @@ export const GET: RequestHandler = async ({ params, url }) => {
 		return json({ error: 'Not Found', message: `Bucket ${id} not found` }, { status: 404 });
 	}
 
-	const [{ total }] = await db.select({ total: count() }).from(files).where(eq(files.bucketId, id));
+	const searchConditions = search
+		? or(like(files.originalName, `%${search}%`), eq(files.id, search), eq(files.mimeType, search))
+		: undefined;
 
+	const whereClause = searchConditions
+		? and(eq(files.bucketId, id), searchConditions)
+		: eq(files.bucketId, id);
+
+	let orderCol;
+	if (sortBy === 'sizeBytes') {
+		orderCol = files.sizeBytes;
+	} else {
+		orderCol = files.createdAt;
+	}
+
+	const orderFn = sortOrder === 'asc' ? asc : desc;
+
+	// Fetch limit + 1 to determine if there is a next page
 	const data = await db
 		.select()
 		.from(files)
-		.where(eq(files.bucketId, id))
-		.orderBy(desc(files.createdAt))
-		.limit(limit)
+		.where(whereClause)
+		.orderBy(orderFn(orderCol))
+		.limit(limit + 1)
 		.offset(offset);
 
-	return json({ data, total, page, limit });
+	const hasNextPage = data.length > limit;
+	const results = hasNextPage ? data.slice(0, limit) : data;
+
+	return json({ data: results, hasNextPage, nextOffset: offset + limit });
 };
 
 /**

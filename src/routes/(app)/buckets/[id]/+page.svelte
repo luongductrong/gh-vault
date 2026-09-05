@@ -10,21 +10,50 @@
 		HardDrive,
 		ImageOff,
 		LoaderCircle,
-		Upload
+		Upload,
+		ListFilter
 	} from '@lucide/svelte';
 
 	import { page } from '$app/state';
 	import { fetchApi, uploadFileWithProgress, fileToBase64, formatBytes } from '$lib/api';
-	import { createQuery, createMutation, useQueryClient } from '@tanstack/svelte-query';
+	import {
+		createQuery,
+		createMutation,
+		createInfiniteQuery,
+		useQueryClient
+	} from '@tanstack/svelte-query';
 	import { Button } from '$lib/components/ui/button';
+	import { Input } from '$lib/components/ui/input';
 	import { Card, CardContent } from '$lib/components/ui/card';
 	import { Dialog, DialogContent, DialogTitle, DialogDescription } from '$lib/components/ui/dialog';
+	import {
+		DropdownMenu,
+		DropdownMenuContent,
+		DropdownMenuLabel,
+		DropdownMenuSeparator,
+		DropdownMenuRadioGroup,
+		DropdownMenuRadioItem,
+		DropdownMenuTrigger
+	} from '$lib/components/ui/dropdown-menu';
 	import { Skeleton } from '$lib/components/ui/skeleton';
 	import { toast } from 'svelte-sonner';
 	import type { Bucket, FileItem } from '$lib/types';
 
 	const queryClient = useQueryClient();
 	const bucketId = $derived(page.params.id as string);
+
+	let searchQuery = $state('');
+	let debouncedSearch = $state('');
+	let sortBy = $state('createdAt');
+	let sortOrder = $state('desc');
+
+	$effect(() => {
+		const q = searchQuery.trim();
+		const handler = setTimeout(() => {
+			debouncedSearch = q.length > 2 ? q : '';
+		}, 300);
+		return () => clearTimeout(handler);
+	});
 
 	// Fetch bucket info
 	const bucketQuery = createQuery(() => ({
@@ -33,11 +62,29 @@
 	}));
 
 	// Fetch files
-	const filesQuery = createQuery(() => ({
-		queryKey: ['buckets', bucketId, 'files'],
-		queryFn: () =>
-			fetchApi<{ data: FileItem[]; total: number }>(`/buckets/${bucketId}/files?limit=50`)
+	const filesQuery = createInfiniteQuery(() => ({
+		queryKey: ['buckets', bucketId, 'files', debouncedSearch, sortBy, sortOrder],
+		queryFn: ({ pageParam = 0 }) =>
+			fetchApi<{ data: FileItem[]; hasNextPage: boolean; nextOffset: number }>(
+				`/buckets/${bucketId}/files?offset=${pageParam}&limit=30&search=${encodeURIComponent(debouncedSearch)}&sortBy=${sortBy}&sortOrder=${sortOrder}`
+			),
+		initialPageParam: 0,
+		getNextPageParam: (lastPage) => (lastPage.hasNextPage ? lastPage.nextOffset : undefined)
 	}));
+
+	const uniqueFiles = $derived.by(() => {
+		if (!filesQuery.data) return [];
+		// eslint-disable-next-line svelte/prefer-svelte-reactivity
+		const map = new Map<string, FileItem>();
+		for (const page of filesQuery.data.pages) {
+			for (const file of page.data) {
+				if (!map.has(file.id)) {
+					map.set(file.id, file);
+				}
+			}
+		}
+		return Array.from(map.values());
+	});
 
 	let uploadProgress = $state<number | null>(null);
 	let fileInputRef = $state<HTMLInputElement | null>(null);
@@ -122,7 +169,9 @@
 					>
 						<ArrowLeft size={20} />
 					</a>
-					<h1 class="text-3xl font-bold tracking-tight">{b.displayName || b.githubRepoName}</h1>
+					<h1 class="text-xl font-bold tracking-tight sm:text-2xl md:text-3xl">
+						{b.displayName || b.githubRepoName}
+					</h1>
 				</div>
 				<div class="ml-8 flex flex-wrap items-center gap-x-6 gap-y-2 text-sm text-muted-foreground">
 					<a
@@ -175,6 +224,38 @@
 
 	<!-- File List -->
 	<div class="pt-2">
+		<div class="mb-4 flex flex-row items-center justify-end gap-4 sm:justify-between">
+			<h2 class="hidden text-xl font-semibold tracking-tight sm:inline-block">Files</h2>
+			<div class="flex items-center gap-2">
+				<div class="w-full max-w-xs sm:w-64">
+					<Input placeholder="Search files..." bind:value={searchQuery} />
+				</div>
+				<DropdownMenu>
+					<DropdownMenuTrigger>
+						{#snippet child({ props })}
+							<Button variant="outline" size="icon" {...props} title="Sort Options">
+								<ListFilter size={16} />
+							</Button>
+						{/snippet}
+					</DropdownMenuTrigger>
+					<DropdownMenuContent align="end">
+						<DropdownMenuLabel>Sort By</DropdownMenuLabel>
+						<DropdownMenuSeparator />
+						<DropdownMenuRadioGroup bind:value={sortBy}>
+							<DropdownMenuRadioItem value="createdAt">Date Created</DropdownMenuRadioItem>
+							<DropdownMenuRadioItem value="sizeBytes">File Size</DropdownMenuRadioItem>
+						</DropdownMenuRadioGroup>
+						<DropdownMenuSeparator />
+						<DropdownMenuLabel>Order</DropdownMenuLabel>
+						<DropdownMenuSeparator />
+						<DropdownMenuRadioGroup bind:value={sortOrder}>
+							<DropdownMenuRadioItem value="desc">Descending</DropdownMenuRadioItem>
+							<DropdownMenuRadioItem value="asc">Ascending</DropdownMenuRadioItem>
+						</DropdownMenuRadioGroup>
+					</DropdownMenuContent>
+				</DropdownMenu>
+			</div>
+		</div>
 		{#if filesQuery.isPending}
 			<div class="flex flex-col divide-y divide-border rounded-lg border border-border">
 				{#each Array(8) as _, i (i)}
@@ -191,7 +272,7 @@
 			>
 				Failed to load files: {filesQuery.error.message}
 			</div>
-		{:else if filesQuery.data?.data.length === 0}
+		{:else if uniqueFiles.length === 0}
 			<div
 				class="flex flex-col items-center justify-center rounded-lg border border-dashed border-border bg-muted/20 p-20 text-center text-muted-foreground"
 			>
@@ -213,7 +294,7 @@
 						</tr>
 					</thead>
 					<tbody class="divide-y divide-border">
-						{#each filesQuery.data?.data || [] as file (file.id)}
+						{#each uniqueFiles as file (file.id)}
 							<tr class="transition-colors hover:bg-muted/30">
 								<td class="px-4 py-3">
 									<div class="flex items-center gap-3">
@@ -273,6 +354,23 @@
 					</tbody>
 				</table>
 			</div>
+
+			{#if filesQuery.hasNextPage}
+				<div class="mt-4 flex justify-center pb-4">
+					<Button
+						variant="outline"
+						onclick={() => filesQuery.fetchNextPage()}
+						disabled={filesQuery.isFetchingNextPage}
+					>
+						{#if filesQuery.isFetchingNextPage}
+							<LoaderCircle size={16} class="mr-2 animate-spin" />
+							Loading...
+						{:else}
+							Load More
+						{/if}
+					</Button>
+				</div>
+			{/if}
 		{/if}
 	</div>
 </div>

@@ -58,7 +58,7 @@
 <div class="flex min-h-screen items-center justify-center bg-background p-4">
 	<Card class="w-full max-w-[24rem]">
 		<CardHeader>
-			<CardTitle class="text-2xl font-bold">gh-vault</CardTitle>
+			<CardTitle class="text-2xl font-bold text-primary normal-case">gh-vault</CardTitle>
 			<CardDescription>Enter your credentials to continue.</CardDescription>
 		</CardHeader>
 		<CardContent>

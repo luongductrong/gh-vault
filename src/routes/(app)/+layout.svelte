@@ -1,6 +1,4 @@
 <script lang="ts">
-	import { Box } from '@lucide/svelte';
-
 	import { Button } from '$lib/components/ui/button';
 	import { fetchApi } from '$lib/api';
 	import { goto } from '$app/navigation';
@@ -34,7 +32,7 @@
 	>
 		<div class="container mx-auto flex h-14 items-center justify-between px-4 md:px-6">
 			<a href="/" class="flex items-center gap-2 font-bold tracking-tight text-primary">
-				<Box size={24} />
+				<img src="/app-icon.png" alt="Logo" class="size-6" width="24" height="24" />
 				<span>gh-vault</span>
 			</a>
 			<nav class="flex items-center gap-4">

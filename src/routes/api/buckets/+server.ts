@@ -40,13 +40,13 @@ export const POST: RequestHandler = async ({ request }) => {
 	}
 
 	try {
-		const { pat } = getGitHubConfig();
+		const { pat, owner, type } = getGitHubConfig();
 
 		const id = crypto.randomUUID();
 		const repoName = `vault-${id.slice(0, 8)}`;
 
-		// Create GitHub repo under personal account
-		const repo = await createRepo(pat, repoName);
+		// Create GitHub repo under personal account or organization
+		const repo = await createRepo(pat, repoName, false, owner, type as 'P' | 'O');
 
 		// Persist bucket in DB
 		const [bucket] = await db

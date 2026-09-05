@@ -21,9 +21,12 @@ function ghHeaders(token: string): Record<string, string> {
 export async function createRepo(
 	token: string,
 	name: string,
-	isPrivate = false
+	isPrivate = false,
+	owner: string,
+	type: 'P' | 'O' = 'P'
 ): Promise<GitHubRepoResponse> {
-	const res = await fetch(`${GITHUB_API}/user/repos`, {
+	const endpoint = type === 'O' ? `/orgs/${owner}/repos` : `/user/repos`;
+	const res = await fetch(`${GITHUB_API}${endpoint}`, {
 		method: 'POST',
 		headers: ghHeaders(token),
 		body: JSON.stringify({
@@ -42,7 +45,9 @@ export async function createRepo(
 
 	if (!res.ok) {
 		const errorText = await res.text();
-		throw new Error(`Failed to create repo "${name}" (${res.status}): ${errorText}`);
+		throw new Error(
+			`Failed to create repo "${name}" in ${type === 'O' ? `org ${owner}` : 'personal account'} (${res.status}): ${errorText}`
+		);
 	}
 
 	return res.json();

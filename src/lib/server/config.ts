@@ -3,12 +3,13 @@ import { env } from '$env/dynamic/private';
 export function getGitHubConfig() {
 	const pat = env.GITHUB_PAT;
 	const owner = env.GITHUB_OWNER;
+	const type = env.GITHUB_OWNER_TYPE === 'O' ? 'O' : 'P';
 
 	if (!pat || !owner) {
 		throw new Error('GITHUB_PAT and GITHUB_OWNER must be configured');
 	}
 
-	return { pat, owner };
+	return { pat, owner, type };
 }
 
 export function getAuthConfig() {

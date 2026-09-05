@@ -7,6 +7,14 @@ import { getGitHubConfig } from '$lib/server/config';
 import { uploadFile, buildCdnUrl } from '$lib/server/github/contents';
 
 const MAX_UPLOAD_BYTES = 4 * 1024 * 1024; // 4MB
+const MAX_FILENAME_LENGTH = 255;
+
+function hasInvalidFilenameChars(value: string): boolean {
+	return Array.from(value).some((char) => {
+		const code = char.charCodeAt(0);
+		return char === '/' || char === '\\' || code <= 0x1f || code === 0x7f;
+	});
+}
 
 /**
  * GET /api/buckets/:id/files?offset=0&limit=20
@@ -69,23 +77,60 @@ export const GET: RequestHandler = async ({ params, url }) => {
 export const POST: RequestHandler = async ({ params, request }) => {
 	const { id } = params;
 
-	let body: { content?: string; filename?: string; mime_type?: string };
+	let body: unknown;
 	try {
 		body = await request.json();
 	} catch {
 		return json({ error: 'Bad Request', message: 'Invalid JSON body' }, { status: 400 });
 	}
 
-	if (!body.content || !body.filename) {
+	if (!body || typeof body !== 'object' || Array.isArray(body)) {
+		return json(
+			{ error: 'Bad Request', message: 'Request body must be an object' },
+			{ status: 400 }
+		);
+	}
+
+	const payload = body as {
+		content?: unknown;
+		filename?: unknown;
+		mime_type?: unknown;
+	};
+
+	if (typeof payload.content !== 'string' || typeof payload.filename !== 'string') {
 		return json(
 			{ error: 'Bad Request', message: 'content (base64) and filename are required' },
 			{ status: 400 }
 		);
 	}
 
+	const content = payload.content;
+	const filename = payload.filename.trim();
+	if (!content) {
+		return json(
+			{ error: 'Bad Request', message: 'content (base64) and filename are required' },
+			{ status: 400 }
+		);
+	}
+
+	if (
+		!filename ||
+		filename.length > MAX_FILENAME_LENGTH ||
+		filename === '.' ||
+		filename === '..' ||
+		hasInvalidFilenameChars(filename)
+	) {
+		return json(
+			{ error: 'Bad Request', message: 'filename must be a valid file name' },
+			{ status: 400 }
+		);
+	}
+
+	const mimeType = typeof payload.mime_type === 'string' ? payload.mime_type : null;
+
 	// Estimate original file size from Base64 length
-	const padding = (body.content.match(/=+$/) || [''])[0].length;
-	const sizeBytes = Math.floor((body.content.length * 3) / 4) - padding;
+	const padding = (content.match(/=+$/) || [''])[0].length;
+	const sizeBytes = Math.floor((content.length * 3) / 4) - padding;
 
 	if (sizeBytes > MAX_UPLOAD_BYTES) {
 		return json(
@@ -118,7 +163,8 @@ export const POST: RequestHandler = async ({ params, request }) => {
 	}
 
 	// Generate stored filename: {short_uuid}_{timestamp}.{ext}
-	const ext = body.filename.includes('.') ? body.filename.split('.').pop()! : 'bin';
+	const extensionMatch = filename.match(/\.([a-zA-Z0-9]{1,16})$/);
+	const ext = extensionMatch?.[1].toLowerCase() ?? 'bin';
 	const storedName = `${crypto.randomUUID().slice(0, 8)}_${Date.now()}.${ext}`;
 	const githubPath = `images/${storedName}`;
 
@@ -131,8 +177,8 @@ export const POST: RequestHandler = async ({ params, request }) => {
 			owner,
 			bucket.githubRepoName,
 			githubPath,
-			body.content,
-			`Upload ${body.filename} via gh-vault`
+			content,
+			`Upload ${filename} via gh-vault`
 		);
 
 		const cdnUrl = buildCdnUrl(owner, bucket.githubRepoName, commitSha, githubPath);
@@ -144,14 +190,14 @@ export const POST: RequestHandler = async ({ params, request }) => {
 			.values({
 				id: fileId,
 				bucketId: id,
-				originalName: body.filename,
+				originalName: filename,
 				storedName,
 				githubPath,
 				githubFileSha: fileSha,
 				commitSha,
 				cdnUrl,
 				sizeBytes,
-				mimeType: body.mime_type ?? null
+				mimeType
 			})
 			.returning();
 

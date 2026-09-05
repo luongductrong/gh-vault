@@ -247,9 +247,11 @@ Authenticate using the master password.
 - **Request Body**:
   ```json
   {
+  	"username": "admin",
   	"password": "your-password"
   }
   ```
+- `username` is required by the login form/API, but the app uses a single configured credential.
 - **Response** (`200 OK`): Sets an `HttpOnly`, `SameSite=Strict`, `Secure` cookie named `session_token` valid for 24 hours.
 
 #### `POST /api/auth/logout`

@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { cn } from '$lib/utils.js';
 	import {
 		ArrowLeft,
 		Copy,
@@ -10,18 +11,12 @@
 		HardDrive,
 		ImageOff,
 		LoaderCircle,
-		Upload,
 		ListFilter
 	} from '@lucide/svelte';
 
 	import { page } from '$app/state';
-	import { fetchApi, uploadFileWithProgress, fileToBase64, formatBytes } from '$lib/api';
-	import {
-		createQuery,
-		createMutation,
-		createInfiniteQuery,
-		useQueryClient
-	} from '@tanstack/svelte-query';
+	import { fetchApi, formatBytes } from '$lib/api';
+	import { createQuery, createInfiniteQuery } from '@tanstack/svelte-query';
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
 	import { Card, CardContent } from '$lib/components/ui/card';
@@ -38,8 +33,8 @@
 	import { Skeleton } from '$lib/components/ui/skeleton';
 	import { toast } from 'svelte-sonner';
 	import type { Bucket, FileItem } from '$lib/types';
+	import UploadDialog from '$lib/components/UploadDialog.svelte';
 
-	const queryClient = useQueryClient();
 	const bucketId = $derived(page.params.id as string);
 
 	let searchQuery = $state('');
@@ -86,49 +81,8 @@
 		return Array.from(map.values());
 	});
 
-	let uploadProgress = $state<number | null>(null);
-	let fileInputRef = $state<HTMLInputElement | null>(null);
 	let previewFile = $state<FileItem | null>(null);
 	let isPreviewOpen = $state(false);
-
-	const uploadMutation = createMutation(() => ({
-		mutationFn: async (file: File) => {
-			const base64 = await fileToBase64(file);
-			return uploadFileWithProgress(bucketId, file, base64, (progress) => {
-				uploadProgress = progress;
-			});
-		},
-		onSuccess: () => {
-			toast.success('File uploaded successfully');
-			queryClient.invalidateQueries({ queryKey: ['buckets', bucketId] });
-			queryClient.invalidateQueries({ queryKey: ['buckets', bucketId, 'files'] });
-		},
-		onError: (error: Error) => {
-			toast.error(error.message || 'Upload failed');
-		},
-		onSettled: () => {
-			uploadProgress = null;
-			if (fileInputRef) fileInputRef.value = '';
-		}
-	}));
-
-	function handleFileSelect(e: Event) {
-		const target = e.target as HTMLInputElement;
-		if (!target.files || target.files.length === 0) return;
-
-		const file = target.files[0];
-		if (file.size > 4 * 1024 * 1024) {
-			toast.error('File size exceeds 4MB limit');
-			target.value = '';
-			return;
-		}
-
-		uploadMutation.mutate(file);
-	}
-
-	function triggerFileInput() {
-		fileInputRef?.click();
-	}
 
 	function copyToClipboard(text: string) {
 		navigator.clipboard.writeText(text).then(() => {
@@ -195,29 +149,7 @@
 			</div>
 
 			<div class="flex items-center">
-				<input
-					type="file"
-					accept="image/*"
-					class="hidden"
-					bind:this={fileInputRef}
-					onchange={handleFileSelect}
-					disabled={uploadMutation.isPending || b.status === 'full'}
-				/>
-				<Button
-					onclick={triggerFileInput}
-					disabled={uploadMutation.isPending || b.status === 'full'}
-					size="lg"
-				>
-					{#if uploadMutation.isPending}
-						<LoaderCircle size={16} class="mr-2 animate-spin" />
-						Uploading... {uploadProgress !== null ? `${uploadProgress}%` : ''}
-					{:else if b.status === 'full'}
-						Vault is Full
-					{:else}
-						<Upload size={16} class="mr-2" />
-						Upload Image
-					{/if}
-				</Button>
+				<UploadDialog bucket={b} />
 			</div>
 		</div>
 	{/if}
@@ -377,29 +309,24 @@
 
 <!-- Preview Dialog -->
 <Dialog bind:open={isPreviewOpen}>
-	<DialogContent class="max-w-3xl overflow-hidden p-0">
+	<DialogContent
+		class={cn(
+			'flex items-center justify-center overflow-hidden p-4',
+			'h-dvh max-h-dvh w-dvw max-w-dvw rounded-none',
+			'sm:h-[calc(100dvh-1rem)] sm:max-h-[calc(100dvh-1rem)] sm:w-[calc(100dvw-1rem)] sm:max-w-[calc(100dvw-1rem)] sm:rounded-3xl',
+			'md:h-[calc(100dvh-2rem)] md:max-h-[calc(100dvh-2rem)] md:w-[calc(100dvw-2rem)] md:max-w-[calc(100dvw-2rem)]'
+		)}
+	>
 		<DialogTitle class="sr-only">{previewFile?.originalName ?? 'Preview'}</DialogTitle>
 		<DialogDescription class="sr-only">Image preview</DialogDescription>
 		{#if previewFile}
 			<img
 				src={previewFile.cdnUrl}
 				alt={previewFile.originalName}
-				class="max-h-[80vh] w-full object-contain"
+				class="block h-auto max-h-full w-auto max-w-full object-contain"
 			/>
-			<div class="flex items-center justify-between gap-4 border-t border-border px-4 py-3 text-sm">
-				<span class="truncate font-medium">{previewFile.originalName}</span>
-				<div class="flex shrink-0 items-center gap-2 text-muted-foreground">
-					<span>{formatBytes(previewFile.sizeBytes)}</span>
-					<Button
-						size="sm"
-						variant="secondary"
-						onclick={() => copyToClipboard(previewFile!.cdnUrl)}
-					>
-						<Copy size={14} class="mr-1.5" />
-						Copy CDN link
-					</Button>
-				</div>
-			</div>
+		{:else}
+			<p class="text-muted-foreground">No preview available.</p>
 		{/if}
 	</DialogContent>
 </Dialog>

@@ -98,6 +98,51 @@ export function uploadFileWithProgress<T = unknown>(
 	});
 }
 
+/**
+ * Upload a file directly to a presigned object-storage URL.
+ */
+export function uploadToPresignedUrlWithProgress(
+	uploadUrl: string,
+	file: File,
+	headers: Record<string, string>,
+	onProgress: (progress: number) => void
+): Promise<void> {
+	return new Promise((resolve, reject) => {
+		const xhr = new XMLHttpRequest();
+		xhr.open('PUT', uploadUrl);
+
+		for (const [name, value] of Object.entries(headers)) {
+			xhr.setRequestHeader(name, value);
+		}
+
+		xhr.upload.onprogress = (event) => {
+			if (event.lengthComputable) {
+				const percentComplete = Math.round((event.loaded / event.total) * 100);
+				onProgress(percentComplete);
+			}
+		};
+
+		xhr.onload = () => {
+			if (xhr.status >= 200 && xhr.status < 300) {
+				resolve();
+				return;
+			}
+
+			reject(new ApiError(xhr.status, 'Direct upload failed'));
+		};
+
+		xhr.onerror = () => {
+			reject(new ApiError(0, 'Network error occurred during direct upload'));
+		};
+
+		xhr.onabort = () => {
+			reject(new ApiError(0, 'Direct upload was cancelled'));
+		};
+
+		xhr.send(file);
+	});
+}
+
 export function fileToBase64(file: File): Promise<string> {
 	return new Promise((resolve, reject) => {
 		const reader = new FileReader();

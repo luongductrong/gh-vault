@@ -181,24 +181,45 @@
 			{#each bucketsQuery.data || [] as bucket (bucket.id)}
 				<Card class="flex flex-col transition-colors hover:border-primary/50">
 					<CardHeader>
-						<CardTitle class="truncate" title={bucket.displayName || bucket.githubRepoName}>
-							{bucket.displayName || bucket.githubRepoName}
-						</CardTitle>
-						<CardDescription class="truncate font-mono text-xs">
-							{bucket.githubRepoName}
-						</CardDescription>
+						{#if bucket.provider === 'github'}
+							<CardTitle class="truncate" title={bucket.displayName || bucket.githubRepoName || ''}>
+								{bucket.displayName || bucket.githubRepoName}
+							</CardTitle>
+							<CardDescription class="truncate font-mono text-xs">
+								{bucket.githubRepoName}
+							</CardDescription>
+						{:else}
+							<CardTitle class="truncate" title="Cloudflare R2">
+								{bucket.displayName || 'Cloudflare R2'}
+							</CardTitle>
+							<CardDescription class="truncate font-mono text-xs">
+								R2 · {bucket.r2BucketName}
+							</CardDescription>
+						{/if}
 					</CardHeader>
 					<CardContent class="flex-1 space-y-4 text-sm">
-						<div class="flex justify-between border-b border-border pb-2">
-							<span class="text-muted-foreground">Files</span>
-							<span class="font-medium">{bucket.fileCount} / {bucket.maxFiles}</span>
-						</div>
-						<div class="flex justify-between border-b border-border pb-2">
-							<span class="text-muted-foreground">Storage</span>
-							<span class="font-medium"
-								>{formatBytes(bucket.totalSizeBytes)} / {formatBytes(bucket.maxSizeBytes, 0)}</span
-							>
-						</div>
+						{#if bucket.provider === 'github'}
+							<div class="flex justify-between border-b border-border pb-2">
+								<span class="text-muted-foreground">Files</span>
+								<span class="font-medium">{bucket.fileCount} / {bucket.maxFiles}</span>
+							</div>
+							<div class="flex justify-between border-b border-border pb-2">
+								<span class="text-muted-foreground">Storage</span>
+								<span class="font-medium"
+									>{formatBytes(bucket.totalSizeBytes ?? 0)} /
+									{formatBytes(bucket.maxSizeBytes ?? 0, 0)}</span
+								>
+							</div>
+						{:else}
+							<div class="flex justify-between border-b border-border pb-2">
+								<span class="text-muted-foreground">Provider</span>
+								<span class="font-medium">Cloudflare R2</span>
+							</div>
+							<div class="flex justify-between border-b border-border pb-2">
+								<span class="text-muted-foreground">Storage</span>
+								<span class="font-medium">Managed by R2</span>
+							</div>
+						{/if}
 						<div class="flex justify-between">
 							<span class="text-muted-foreground">Status</span>
 							<span

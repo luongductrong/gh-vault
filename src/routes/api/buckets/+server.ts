@@ -5,6 +5,7 @@ import type { RequestHandler } from './$types';
 import { buckets } from '$lib/server/db/schema';
 import { getGitHubConfig } from '$lib/server/config';
 import { createRepo } from '$lib/server/github/repos';
+import { getR2Bucket, isR2Configured } from '$lib/server/r2/config';
 
 /**
  * GET /api/buckets?status=available
@@ -24,7 +25,11 @@ export const GET: RequestHandler = async ({ url }) => {
 		data = await db.select().from(buckets).orderBy(desc(buckets.createdAt));
 	}
 
-	return json({ data, total: data.length });
+	const githubData = data.map((bucket) => ({ ...bucket, provider: 'github' as const }));
+	const r2Data =
+		isR2Configured() && (!statusFilter || statusFilter === 'available') ? [getR2Bucket()] : [];
+
+	return json({ data: [...r2Data, ...githubData], total: r2Data.length + githubData.length });
 };
 
 /**
@@ -59,7 +64,7 @@ export const POST: RequestHandler = async ({ request }) => {
 			})
 			.returning();
 
-		return json(bucket, { status: 201 });
+		return json({ ...bucket, provider: 'github' as const }, { status: 201 });
 	} catch (err) {
 		const message = err instanceof Error ? err.message : 'Unknown error';
 		console.error('[Buckets] Failed to create bucket:', message);

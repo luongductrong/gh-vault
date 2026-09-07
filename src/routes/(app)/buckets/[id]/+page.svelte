@@ -85,12 +85,14 @@
 	let isPreviewOpen = $state(false);
 
 	function copyToClipboard(text: string) {
+		if (!text) return;
 		navigator.clipboard.writeText(text).then(() => {
 			toast.success('Copied to clipboard');
 		});
 	}
 
 	function openPreview(file: FileItem) {
+		if (!file.cdnUrl) return;
 		previewFile = file;
 		isPreviewOpen = true;
 	}
@@ -124,27 +126,34 @@
 						<ArrowLeft size={20} />
 					</a>
 					<h1 class="text-xl font-bold tracking-tight sm:text-2xl md:text-3xl">
-						{b.displayName || b.githubRepoName}
+						{b.displayName || (b.provider === 'github' ? b.githubRepoName : 'Cloudflare R2')}
 					</h1>
 				</div>
 				<div class="ml-8 flex flex-wrap items-center gap-x-6 gap-y-2 text-sm text-muted-foreground">
-					<a
-						href="https://github.com/{b.githubRepoFullName}"
-						target="_blank"
-						rel="noopener noreferrer"
-						class="flex items-center gap-1.5 transition-colors hover:text-foreground"
-					>
-						<GitBranch class="mr-1" size={16} />
-						{b.githubRepoFullName}
-					</a>
-					<span class="flex items-center gap-1.5">
-						<FileImage size={16} />
-						{b.fileCount} / {b.maxFiles} files
-					</span>
-					<span class="flex items-center gap-1.5">
-						<HardDrive size={16} />
-						{formatBytes(b.totalSizeBytes)} / {formatBytes(b.maxSizeBytes, 0)}
-					</span>
+					{#if b.provider === 'github'}
+						<a
+							href="https://github.com/{b.githubRepoFullName}"
+							target="_blank"
+							rel="noopener noreferrer"
+							class="flex items-center gap-1.5 transition-colors hover:text-foreground"
+						>
+							<GitBranch class="mr-1" size={16} />
+							{b.githubRepoFullName}
+						</a>
+						<span class="flex items-center gap-1.5">
+							<FileImage size={16} />
+							{b.fileCount} / {b.maxFiles} files
+						</span>
+						<span class="flex items-center gap-1.5">
+							<HardDrive size={16} />
+							{formatBytes(b.totalSizeBytes ?? 0)} / {formatBytes(b.maxSizeBytes ?? 0, 0)}
+						</span>
+					{:else}
+						<span class="flex items-center gap-1.5">
+							<HardDrive size={16} />
+							Cloudflare R2 · {b.r2BucketName}
+						</span>
+					{/if}
 				</div>
 			</div>
 
@@ -230,7 +239,7 @@
 							<tr class="transition-colors hover:bg-muted/30">
 								<td class="px-4 py-3">
 									<div class="flex items-center gap-3">
-										{#if file.mimeType?.startsWith('image/')}
+										{#if file.mimeType?.startsWith('image/') && file.cdnUrl}
 											<FileImage size={18} class="shrink-0 text-muted-foreground" />
 										{:else}
 											<FileIcon size={18} class="shrink-0 text-muted-foreground" />
@@ -251,7 +260,7 @@
 								</td>
 								<td class="px-4 py-3">
 									<div class="flex items-center justify-end gap-1">
-										{#if file.mimeType?.startsWith('image/')}
+										{#if file.mimeType?.startsWith('image/') && file.cdnUrl}
 											<Button
 												size="icon-sm"
 												variant="ghost"
@@ -261,24 +270,33 @@
 												<Eye size={15} />
 											</Button>
 										{/if}
-										<Button
-											size="icon-sm"
-											variant="ghost"
-											onclick={() => copyToClipboard(file.cdnUrl)}
-											title="Copy CDN link"
-										>
-											<Copy size={15} />
-										</Button>
-										<Button
-											size="icon-sm"
-											variant="ghost"
-											href={file.cdnUrl}
-											target="_blank"
-											rel="noopener noreferrer"
-											title="Open in new tab"
-										>
-											<ExternalLink size={15} />
-										</Button>
+										{#if file.cdnUrl}
+											<Button
+												size="icon-sm"
+												variant="ghost"
+												onclick={() => copyToClipboard(file.cdnUrl)}
+												title="Copy CDN link"
+											>
+												<Copy size={15} />
+											</Button>
+											<Button
+												size="icon-sm"
+												variant="ghost"
+												href={file.cdnUrl}
+												target="_blank"
+												rel="noopener noreferrer"
+												title="Open in new tab"
+											>
+												<ExternalLink size={15} />
+											</Button>
+										{:else if file.provider === 'r2'}
+											<span
+												class="px-2 text-xs text-muted-foreground"
+												title="Configure R2_PUBLIC_BASE_URL to enable public links"
+											>
+												No public URL
+											</span>
+										{/if}
 									</div>
 								</td>
 							</tr>
@@ -319,7 +337,7 @@
 	>
 		<DialogTitle class="sr-only">{previewFile?.originalName ?? 'Preview'}</DialogTitle>
 		<DialogDescription class="sr-only">Image preview</DialogDescription>
-		{#if previewFile}
+		{#if previewFile?.cdnUrl}
 			<img
 				src={previewFile.cdnUrl}
 				alt={previewFile.originalName}

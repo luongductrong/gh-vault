@@ -17,14 +17,21 @@
 	import { Slider } from '$lib/components/ui/slider';
 	import { toast } from 'svelte-sonner';
 	import { createMutation, useQueryClient } from '@tanstack/svelte-query';
-	import { uploadFileWithProgress, fileToBase64, formatBytes } from '$lib/api';
-	import type { Bucket } from '$lib/types';
+	import {
+		fetchApi,
+		uploadFileWithProgress,
+		uploadToPresignedUrlWithProgress,
+		fileToBase64,
+		formatBytes
+	} from '$lib/api';
+	import { UPLOAD_LIMITS } from '$lib/configs';
+	import type { Bucket, FileItem, R2UploadInit } from '$lib/types';
 
-	const MAX_SIZE = 4 * 1024 * 1024;
 	const RESIZABLE_IMAGE_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp']);
 
 	type BrowserCapabilities = {
 		upload: boolean;
+		fileReader: boolean;
 		canvasResize: boolean;
 		png: boolean;
 		jpeg: boolean;
@@ -36,6 +43,7 @@
 	const queryClient = useQueryClient();
 	let capabilities = $state<BrowserCapabilities>({
 		upload: false,
+		fileReader: false,
 		canvasResize: false,
 		png: false,
 		jpeg: false,
@@ -55,6 +63,11 @@
 	let isConverting = $state(false);
 
 	let uploadProgress = $state<number | null>(null);
+	let maxUploadSize = $derived(bucket.provider === 'r2' ? UPLOAD_LIMITS.r2 : UPLOAD_LIMITS.github);
+	let maxUploadSizeLabel = $derived(formatBytes(maxUploadSize, 0));
+	let canUpload = $derived(
+		capabilities.upload && (bucket.provider === 'r2' || capabilities.fileReader)
+	);
 
 	let originalWidth = $state<number>(0);
 	let originalHeight = $state<number>(0);
@@ -118,7 +131,7 @@
 
 	// Browser-only feature detection. Keep unsupported controls disabled instead of failing later.
 	onMount(() => {
-		const canReadFiles =
+		const canUseFileReader =
 			typeof File !== 'undefined' &&
 			typeof FileReader !== 'undefined' &&
 			typeof FileReader.prototype.readAsDataURL === 'function';
@@ -137,7 +150,11 @@
 		}
 
 		capabilities.upload =
-			canReadFiles && canCreateObjectUrls && canTrackUpload && typeof Image === 'function';
+			canCreateObjectUrls &&
+			canTrackUpload &&
+			typeof File !== 'undefined' &&
+			typeof Image === 'function';
+		capabilities.fileReader = canUseFileReader;
 
 		try {
 			const canvas = document.createElement('canvas');
@@ -290,6 +307,30 @@
 
 	const uploadMutation = createMutation(() => ({
 		mutationFn: async (file: File) => {
+			if (bucket.provider === 'r2') {
+				const init = await fetchApi<R2UploadInit>(`/buckets/${bucket.id}/uploads`, {
+					method: 'POST',
+					body: JSON.stringify({
+						filename: file.name,
+						mime_type: file.type,
+						size: file.size
+					})
+				});
+
+				uploadProgress = 0;
+				await uploadToPresignedUrlWithProgress(init.uploadUrl, file, init.headers, (progress) => {
+					uploadProgress = progress;
+				});
+
+				return fetchApi<FileItem>(`/buckets/${bucket.id}/uploads/complete`, {
+					method: 'POST',
+					body: JSON.stringify({ key: init.key, size: file.size })
+				});
+			}
+
+			if (!capabilities.fileReader) {
+				throw new Error('This browser cannot prepare a GitHub upload');
+			}
 			const base64 = await fileToBase64(file);
 			return uploadFileWithProgress(bucket.id, file, base64, (progress) => {
 				uploadProgress = progress;
@@ -332,7 +373,7 @@
 	}
 
 	function handleFileSelect(e: Event) {
-		if (!capabilities.upload) {
+		if (!canUpload) {
 			toast.error('This browser does not support file uploads');
 			return;
 		}
@@ -364,9 +405,9 @@
 	}
 
 	function handleUpload() {
-		if (!activeFile || !capabilities.upload || !canConvertToTarget) return;
-		if (activeFile.size > MAX_SIZE) {
-			toast.error('File size exceeds 4MB limit');
+		if (!activeFile || !canUpload || !canConvertToTarget) return;
+		if (activeFile.size > maxUploadSize) {
+			toast.error(`File size exceeds ${maxUploadSizeLabel} limit`);
 			return;
 		}
 		uploadMutation.mutate(activeFile);
@@ -380,11 +421,11 @@
 		class="hidden"
 		bind:this={fileInputRef}
 		onchange={handleFileSelect}
-		disabled={!capabilities.upload || uploadMutation.isPending || bucket.status === 'full'}
+		disabled={!canUpload || uploadMutation.isPending || bucket.status === 'full'}
 	/>
 	<Button
 		onclick={() => fileInputRef?.click()}
-		disabled={!capabilities.upload || uploadMutation.isPending || bucket.status === 'full'}
+		disabled={!canUpload || uploadMutation.isPending || bucket.status === 'full'}
 		size="lg"
 	>
 		{#if uploadMutation.isPending}
@@ -453,7 +494,7 @@
 									{/if}
 								</span>
 								<span
-									class={activeFile && activeFile.size > MAX_SIZE
+									class={activeFile && activeFile.size > maxUploadSize
 										? 'font-bold text-destructive'
 										: 'font-medium'}
 								>
@@ -546,8 +587,10 @@
 
 				<DialogFooter class="sm:justify-between">
 					<div>
-						{#if activeFile && activeFile.size > MAX_SIZE}
-							<p class="text-sm font-medium text-destructive">File exceeds 4MB limit.</p>
+						{#if activeFile && activeFile.size > maxUploadSize}
+							<p class="text-sm font-medium text-destructive">
+								File exceeds {maxUploadSizeLabel} limit.
+							</p>
 						{/if}
 					</div>
 					<div class="flex gap-2">
@@ -562,9 +605,9 @@
 							onclick={handleUpload}
 							disabled={uploadMutation.isPending ||
 								!activeFile ||
-								!capabilities.upload ||
+								!canUpload ||
 								!canConvertToTarget ||
-								activeFile.size > MAX_SIZE ||
+								activeFile.size > maxUploadSize ||
 								isConverting ||
 								(canResize && (targetWidth < 16 || targetHeight < 16))}
 						>

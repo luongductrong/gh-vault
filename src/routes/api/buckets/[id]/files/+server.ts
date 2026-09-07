@@ -3,60 +3,78 @@ import type { RequestHandler } from './$types';
 import { db } from '$lib/server/db';
 import { buckets, files } from '$lib/server/db/schema';
 import { eq, desc, asc, and, like, or } from 'drizzle-orm';
+import { R2_BUCKET_ID, UPLOAD_LIMITS } from '$lib/configs';
 import { getGitHubConfig } from '$lib/server/config';
+import { createNumberedFilename, isValidFilename } from '$lib/server/filenames';
 import { uploadFile, buildCdnUrl } from '$lib/server/github/contents';
+import { deleteR2Object, isR2ObjectKey, listR2Files } from '$lib/server/r2/objects';
+import { isR2Configured } from '$lib/server/r2/config';
 
-const MAX_UPLOAD_BYTES = 4 * 1024 * 1024; // 4MB
-const MAX_FILENAME_LENGTH = 255;
-
-function hasInvalidFilenameChars(value: string): boolean {
-	return Array.from(value).some((char) => {
-		const code = char.charCodeAt(0);
-		return char === '/' || char === '\\' || code <= 0x1f || code === 0x7f;
-	});
+function parsePaginationValue(value: string | null, fallback: number): number {
+	const parsed = Number.parseInt(value ?? '', 10);
+	return Number.isFinite(parsed) ? parsed : fallback;
 }
 
-function splitFilename(filename: string): { stem: string; extension: string } {
-	const lastDot = filename.lastIndexOf('.');
-	if (lastDot <= 0 || lastDot === filename.length - 1) {
-		return { stem: filename, extension: '' };
+async function getR2FileList(url: URL) {
+	if (!isR2Configured()) {
+		return json({ error: 'Not Found', message: 'R2 is not configured' }, { status: 404 });
 	}
 
-	return {
-		stem: filename.slice(0, lastDot),
-		extension: filename.slice(lastDot)
-	};
-}
+	try {
+		const offset = Math.max(0, parsePaginationValue(url.searchParams.get('offset'), 0));
+		const limit = Math.min(
+			100,
+			Math.max(1, parsePaginationValue(url.searchParams.get('limit'), 20))
+		);
+		const search = (url.searchParams.get('search') ?? '').toLowerCase();
+		const sortBy = url.searchParams.get('sortBy') ?? 'createdAt';
+		const sortOrder = url.searchParams.get('sortOrder') === 'asc' ? 1 : -1;
+		const allFiles = await listR2Files();
 
-function createNumberedFilename(requestedName: string, existingNames: Iterable<string>): string {
-	const usedNames = new Set(Array.from(existingNames, (name) => name.toLowerCase()));
-	if (!usedNames.has(requestedName.toLowerCase())) return requestedName;
+		const filteredFiles = allFiles
+			.filter((file) => {
+				if (!search) return true;
+				return [file.originalName, file.id, file.mimeType ?? ''].some((value) =>
+					value.toLowerCase().includes(search)
+				);
+			})
+			.sort((left, right) => {
+				const leftValue = sortBy === 'sizeBytes' ? left.sizeBytes : Date.parse(left.createdAt);
+				const rightValue = sortBy === 'sizeBytes' ? right.sizeBytes : Date.parse(right.createdAt);
+				if (leftValue === rightValue) {
+					return sortOrder * left.originalName.localeCompare(right.originalName);
+				}
+				return sortOrder * (leftValue - rightValue);
+			});
 
-	const { stem, extension } = splitFilename(requestedName);
+		const results = filteredFiles.slice(offset, offset + limit);
+		const totalSizeBytes = filteredFiles.reduce((total, file) => total + file.sizeBytes, 0);
 
-	for (let counter = 1; counter <= usedNames.size + 1; counter += 1) {
-		const suffix = ` (${counter})`;
-		const maxStemLength = MAX_FILENAME_LENGTH - suffix.length - extension.length;
-		const candidate =
-			maxStemLength > 0
-				? `${stem.slice(0, maxStemLength)}${suffix}${extension}`
-				: `${requestedName.slice(0, MAX_FILENAME_LENGTH - suffix.length)}${suffix}`;
-
-		if (!usedNames.has(candidate.toLowerCase())) return candidate;
+		return json({
+			data: results,
+			hasNextPage: offset + limit < filteredFiles.length,
+			nextOffset: offset + limit,
+			totalCount: filteredFiles.length,
+			totalSizeBytes
+		});
+	} catch (err) {
+		const message = err instanceof Error ? err.message : 'Unknown error';
+		console.error('[R2] Failed to list files:', message);
+		return json({ error: 'Failed to list R2 files', message }, { status: 502 });
 	}
-
-	throw new Error('Unable to generate a unique file name');
 }
 
 /**
  * GET /api/buckets/:id/files?offset=0&limit=20
- * List files in a bucket (from DB), paginated.
+ * List files in a bucket. GitHub files come from the DB; R2 files come from
+ * the bucket's S3-compatible object API.
  */
 export const GET: RequestHandler = async ({ params, url }) => {
 	const { id } = params;
-	// Always use offset-based pagination instead of pages to avoid confusion when flattening
-	const offset = parseInt(url.searchParams.get('offset') ?? '0', 10);
-	const limit = parseInt(url.searchParams.get('limit') ?? '20', 10);
+	if (id === R2_BUCKET_ID) return getR2FileList(url);
+
+	const offset = Math.max(0, parsePaginationValue(url.searchParams.get('offset'), 0));
+	const limit = Math.min(100, Math.max(1, parsePaginationValue(url.searchParams.get('limit'), 20)));
 	const search = url.searchParams.get('search') ?? '';
 	const sortBy = url.searchParams.get('sortBy') ?? 'createdAt';
 	const sortOrder = url.searchParams.get('sortOrder') ?? 'desc';
@@ -75,13 +93,7 @@ export const GET: RequestHandler = async ({ params, url }) => {
 		? and(eq(files.bucketId, id), searchConditions)
 		: eq(files.bucketId, id);
 
-	let orderCol;
-	if (sortBy === 'sizeBytes') {
-		orderCol = files.sizeBytes;
-	} else {
-		orderCol = files.createdAt;
-	}
-
+	const orderCol = sortBy === 'sizeBytes' ? files.sizeBytes : files.createdAt;
 	const orderFn = sortOrder === 'asc' ? asc : desc;
 
 	// Fetch limit + 1 to determine if there is a next page
@@ -96,18 +108,28 @@ export const GET: RequestHandler = async ({ params, url }) => {
 	const hasNextPage = data.length > limit;
 	const results = hasNextPage ? data.slice(0, limit) : data;
 
-	return json({ data: results, hasNextPage, nextOffset: offset + limit });
+	return json({
+		data: results.map((file) => ({ ...file, provider: 'github' as const })),
+		hasNextPage,
+		nextOffset: offset + limit
+	});
 };
 
 /**
  * POST /api/buckets/:id/files
- * Upload a file through the backend (max 4MB).
+ * Upload a GitHub file through the backend (max 4MB).
  *
  * Request body: { content: "base64...", filename: "photo.jpg", mime_type?: "image/jpeg" }
  * The `content` field must be a raw Base64 string WITHOUT the data URI prefix.
  */
 export const POST: RequestHandler = async ({ params, request }) => {
 	const { id } = params;
+	if (id === R2_BUCKET_ID) {
+		return json(
+			{ error: 'Method Not Allowed', message: 'Use the R2 upload endpoint for direct uploads' },
+			{ status: 405 }
+		);
+	}
 
 	let body: unknown;
 	try {
@@ -145,13 +167,7 @@ export const POST: RequestHandler = async ({ params, request }) => {
 		);
 	}
 
-	if (
-		!filename ||
-		filename.length > MAX_FILENAME_LENGTH ||
-		filename === '.' ||
-		filename === '..' ||
-		hasInvalidFilenameChars(filename)
-	) {
+	if (!isValidFilename(filename)) {
 		return json(
 			{ error: 'Bad Request', message: 'filename must be a valid file name' },
 			{ status: 400 }
@@ -164,11 +180,11 @@ export const POST: RequestHandler = async ({ params, request }) => {
 	const padding = (content.match(/=+$/) || [''])[0].length;
 	const sizeBytes = Math.floor((content.length * 3) / 4) - padding;
 
-	if (sizeBytes > MAX_UPLOAD_BYTES) {
+	if (sizeBytes > UPLOAD_LIMITS.github) {
 		return json(
 			{
 				error: 'Bad Request',
-				message: `File too large (${(sizeBytes / 1024 / 1024).toFixed(1)}MB). Max ${MAX_UPLOAD_BYTES / 1024 / 1024}MB.`
+				message: `File too large (${(sizeBytes / 1024 / 1024).toFixed(1)}MB). Max ${UPLOAD_LIMITS.github / 1024 / 1024}MB.`
 			},
 			{ status: 400 }
 		);
@@ -258,10 +274,54 @@ export const POST: RequestHandler = async ({ params, request }) => {
 			})
 			.where(eq(buckets.id, id));
 
-		return json(file, { status: 201 });
+		return json({ ...file, provider: 'github' as const }, { status: 201 });
 	} catch (err) {
 		const message = err instanceof Error ? err.message : 'Unknown error';
 		console.error('[Files] Upload failed:', message);
 		return json({ error: 'Failed to upload file', message }, { status: 500 });
+	}
+};
+
+/**
+ * DELETE /api/buckets/:id/files
+ * Delete an R2 object by its returned object key.
+ */
+export const DELETE: RequestHandler = async ({ params, request }) => {
+	const { id } = params;
+	if (id !== R2_BUCKET_ID) {
+		return json(
+			{ error: 'Method Not Allowed', message: 'Only R2 objects can be deleted here' },
+			{ status: 405 }
+		);
+	}
+	if (!isR2Configured()) {
+		return json({ error: 'Not Found', message: 'R2 is not configured' }, { status: 404 });
+	}
+
+	let body: unknown;
+	try {
+		body = await request.json();
+	} catch {
+		return json({ error: 'Bad Request', message: 'Invalid JSON body' }, { status: 400 });
+	}
+
+	const key =
+		body && typeof body === 'object' && !Array.isArray(body) && 'key' in body
+			? (body as { key?: unknown }).key
+			: undefined;
+	if (typeof key !== 'string' || !isR2ObjectKey(key)) {
+		return json(
+			{ error: 'Bad Request', message: 'A valid R2 object key is required' },
+			{ status: 400 }
+		);
+	}
+
+	try {
+		await deleteR2Object(key);
+		return json({ data: { key } });
+	} catch (err) {
+		const message = err instanceof Error ? err.message : 'Unknown error';
+		console.error('[R2] Failed to delete object:', message);
+		return json({ error: 'Failed to delete R2 object', message }, { status: 502 });
 	}
 };
